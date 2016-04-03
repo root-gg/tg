@@ -1,0 +1,220 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+
+use Getopt::Long;
+use Data::Dumper;
+use Socket;
+
+my $opts = {};
+my $strargs = join (' ', @ARGV);
+
+Getopt::Long::Configure("pass_through","no_ignore_case");
+my ( $ret,$args ) = Getopt::Long::GetOptionsFromString( $strargs, $opts,
+    "R:s",
+    "L:s",
+    "init",
+    "clean",
+    "panic",
+    "d|debug",
+);
+
+my $debug = 0;
+$debug = 1 if defined $opts->{'d'};
+
+my $config 	= loadOrInitConfiguration();
+
+if ( @$args )
+{
+    ###
+    # No tg client options so passing args to the remote bastion
+    ###
+
+    # Forge command
+    ssh( $strargs );
+}
+else
+{
+    if ( defined $opts->{'init'} )
+    {
+        ###
+        # Add public key in the remote bastion user authorised keys file
+        ###
+
+        my $key = getPublicKey();
+        ssh ( "-client addkey -- \"$key\"" );
+    }
+    elsif ( defined $opts->{'clean'} or defined $opts->{'panic'} )
+    {
+        ###
+        # Remove public key from the remote bastion user authorised keys file
+        # Panic : also delete remote private key and delete remote configuration
+        ###
+
+        my $key = getPublicKey();
+
+        my $sshargs = "-client removekey";
+        $sshargs   .= " -c " if defined $opts->{'panic'};
+        $sshargs   .= " -- \"$key\"" ;
+
+        ssh ( $sshargs );
+    }
+    elsif ( defined $opts->{'R'} )
+    {
+        my $host        = 'localhost';
+        my $remotePort  = $config->{'tunnel'};
+        my $localPort   = 22;
+
+        if ( $opts->{'R'} =~ /^(\d+)\:(\S+)\:(\d+)$/ )
+        {
+            $remotePort = $1;
+            $host       = $2;
+            $localPort  = $3;
+        }
+
+        if ( $opts->{'R'} =~ /^(\d+)$/ )
+        {
+            $remotePort  = $1;
+        }
+
+        ssh ( "-client shell", "-R $remotePort:$host:$localPort" );
+    }
+    elsif ( defined $opts->{'L'} )
+    {
+        my $host        = 'localhost';
+        my $remotePort  = 22;
+        my $localPort   = $config->{'tunnel'};
+
+        if ( $opts->{'L'} =~ /^(\d+)\:(\S+)\:(\d+)$/ )
+        {
+            $localPort  = $1;
+            $host       = $2;
+            $remotePort = $3;
+        }
+
+        if ( $opts->{'L'} =~ /^(\d+)$/ )
+        {
+            $remotePort = $1;
+        }
+
+        ssh ( "-client shell", "-L $localPort:$host:$remotePort" );
+    }
+    else
+    {
+        ssh ("-h");
+    }
+}
+
+sub loadOrInitConfiguration
+{
+    my $configFile = $ENV{'HOME'}."/.tgrc";
+    my $config = {
+        'master'    => "",
+        'user'      => $ENV{'USER'},
+        'port'      => 22,
+        'keyfile'   => $ENV{'HOME'}."/.ssh/id_rsa.pub",
+        'tunnel'    => int rand(40000) + 10000,
+    };
+
+    if( -e $configFile )
+    {
+        open FILE, "<", $configFile or die( "Can't open config $configFile : $!" );
+        while(<FILE>)
+        {
+            if ( $_ =~ /^(\w+)=(\S+)$/ )
+            {
+                $config->{$1} = $2 if $2;
+            }
+        }
+        close FILE;
+    }
+    else
+    {
+        print "Enter Bastion Host   [".$config->{'master'}."]\t   : ";
+        my $input = <STDIN>;
+        chomp $input;
+        $config->{'master'} = $input if $input ne "";
+
+
+        print "Enter Bastion Port   [".$config->{'port'}."]\t\t   : ";
+        $input = <STDIN>;
+        chomp $input;
+        $config->{'port'}   = $input if $input ne "";
+
+
+        print "Enter Bastion User   [".$config->{'user'}."]\t   : ";
+        $input = <STDIN>;
+        chomp $input;
+        $config->{'user'}  = $input if $input ne "";
+
+        print "Enter Key File   [".$config->{'keyfile'}."]\t   : ";
+        $input = <STDIN>;
+        chomp $input;
+        $config->{'keyfile'}   = $input if $input ne "";
+
+        unless ( -e $config->{'keyfile'})
+        {
+            my $private_key_file  = $config->{'keyfile'};
+            $private_key_file =~ s/\.pub$//;
+            `ssh-keygen -f $private_key_file`;
+        }
+
+        print "Enter default port for tunnels [".$config->{'tunnel'}."]\t   : ";
+        $input = <STDIN>;
+        chomp $input;
+        $config->{'tunnel'}   = $input if $input ne "";
+
+        open FILE, ">", $configFile or die( "Can't save config $configFile : $!" );
+
+        foreach my $key ( keys %$config )
+        {
+            print FILE $key."=".$config->{$key}."\n";
+        }
+
+        close FILE;
+
+        print "Config file saved in $configFile \n";
+    }
+
+    map { print $_ . "=" . $config->{$_} . "\n" } keys %$config if $debug;
+    return $config;
+}
+
+sub ssh
+{
+    my $remoteArgs = shift;
+    my $localArgs  = shift;
+
+    my $sshcmd = "ssh -t -t";
+    $sshcmd   .= " -q" unless $debug;
+    $sshcmd   .= " -p ".$config->{'port'};
+    $sshcmd   .= " $localArgs" if $localArgs;
+    $sshcmd   .= " ".$config->{'user'}.'@'.$config->{'master'};
+    $sshcmd   .= " -- $remoteArgs" if $remoteArgs;
+    print $sshcmd."\n" if $debug;
+    exec $sshcmd;
+}
+
+sub getPublicKey
+{
+    my $key;
+
+    open KEY , '<', $config->{'keyfile'} 
+        or die ("[INIT] Can't open public key $config->{'keyfile'} : $!");
+
+    $key = <KEY>;
+
+    close KEY;
+
+    chomp $key;
+
+    unless ( $key and $key =~ /^ssh-/ )
+    {
+        print "[INIT] Invalid ssh publickey in $config->{'keyfile'}\n";
+        exit 1;
+    }
+
+    print "Public key : $key\n" if $debug;
+    return $key;
+}

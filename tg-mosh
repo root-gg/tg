@@ -1,0 +1,108 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+
+use Data::Dumper;
+use Getopt::Long;
+use Expect;
+use Socket;
+
+#
+## Get opts
+#
+
+if(scalar(@ARGV) == 0)
+{
+    print "Please specify host to connect\n";
+    exit;
+}
+
+
+my $tgConfigFile 	= $ENV{'HOME'} . '/.tgrc';
+my $tgConfiguration	= getTgConfiguration();
+
+
+#
+## Test binaries
+#
+
+my $moshBinary 	= `which mosh-client`;
+$moshBinary		=~ s/\n//g;
+
+if(!$moshBinary)
+{
+    die "Mosh client not found\n";
+}
+
+my $cmd = 'ssh -t -t -p ' . $tgConfiguration->{'port'} . ' ' . $tgConfiguration->{'user'} . '@' . $tgConfiguration->{'master'} . " -- -mosh @ARGV";
+
+
+
+
+#
+## Launch command and get mosh code
+#
+
+
+# Spawn
+my $exp = Expect->new;
+$exp->slave->clone_winsize_from(\*STDIN);
+$exp->spawn($cmd);
+$exp->log_stdout(0);
+
+my $patidx = $exp->expect( 5, 
+    [
+        qr/MOSH/i, sub 
+        {
+            my $this = shift;
+            my $after = $this->after;
+            chomp $after;
+
+            if($after =~ /CONNECT\s(\d+)\s([^\s]+)/ )
+            {
+                my $port            = $1;
+                $ENV{'MOSH_KEY'} 	= $2;
+
+
+                # Test ip
+                my $host = $tgConfiguration->{'master'};
+                if($host !~ /\d+\.\d+\.\d+\.\d+/)
+                {
+                    $host = inet_ntoa(inet_aton( $host ));
+                }
+
+
+                # Spawn mosh
+                system( "$moshBinary $host $port ");			
+
+
+                $exp->do_soft_close();
+            }
+        }
+    ],
+);
+
+
+
+
+
+
+sub getTgConfiguration
+{
+    my $conf = {};
+
+    # Open file
+    open CONFIG, "<", $tgConfigFile or die $!;
+    while(<CONFIG>)
+    {
+        if($_ =~ /(.*)=([^\n]+)/)
+        {
+            $conf->{ $1 } = $2;
+        }
+    }
+    close CONFIG;	
+
+
+    return $conf;
+}

@@ -1,0 +1,857 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+
+use Data::Dumper;
+use Getopt::Long;
+use Term::ANSIColor qw(:constants colored);
+
+use File::Basename;
+use Cwd 'abs_path';
+my $dir;
+BEGIN { $dir = dirname( abs_path($0) ) }
+use lib "$dir/lib";
+
+use TG::BASTION;
+use TG::HOST;
+use TG::SSH;
+use TG::SCREEN;
+use TG::MISC;
+use TG::LOGGER;
+
+$|=1;
+my $version = '0.4';
+my ( 
+    $client, $c, $remove, $add, $SSH, $remoteUser, $host, $args, $quiet, $tor, 
+    $debug, $scr, $screen, $screenList, $screenWipe, $screenKill, $screenAllowUser, $screenSetPassword, $ret, 
+    $port, $remotePort, $command, $help, $ak, $rk, $rhk, $aa, $ra, $ls, $su, 
+    $sp, $spw, $sn, $se, $sa, $dn, $de, $da, $aca, $rca, $string, $user, $v, $vv, $vvv, $autocomplete, $kill, $mosh,
+    $ayk, $ryk, $ey, $dy,
+);
+
+
+
+# Putty detection 
+if($ENV{'NAAB'})
+{
+    Logger::info("Putty detected with args : " . $ENV{'NAAB'});
+    $args 				= $ENV{'NAAB'};
+    ($args,$command)    = ($1,$2)       if $args and $args =~ /^(.*?)\-\-(.*)$/;
+
+}
+else
+{
+    $args               = $ARGV[1];
+    ($args,$command)    = ($1,$2)       if $args and $args =~ /^(.*?)\-\-(.*)$/;        # SPLIT Args and Comma
+}
+
+if(not $ARGV[1])
+{
+    Logger::warn('This is a bastion, you cannot use this program that way !');
+    exit 1;
+}
+
+
+# Socat/Netcat execution
+if($ARGV[1] =~ /^exec/)
+{
+    exec($ARGV[1]);
+}
+
+# GetOpt
+my $finalCommandLine = 'tg ';
+$finalCommandLine 	.= $args if $args;
+$finalCommandLine	.= ' -- ' . $command if $command;
+
+
+( $ret, $args ) = Getopt::Long::GetOptionsFromString( $args,
+    "client=s"              => \$client,
+    "c|clear"               => \$c,            #debug purpose
+    "p|port=i"              => \$remotePort,
+    "x|exec=s"              => \$command,
+    "s|screen=s"            => \$scr,
+    "sl|screenlist"         => \$screenList,
+    "sw|screenwipe"         => \$screenWipe,
+    "sk|screenkill=s"       => \$screenKill,
+    "sau|screenAllowUser=s" => \$screenAllowUser,
+    "sspw|screenSetPassword=s" => \$screenSetPassword,
+    "a|add=s"               => \$add,
+    "r|remove=s"            => \$remove,
+    "ak|addkey"             => \$ak,
+    "rk|rmkey"              => \$rk,
+    "rhk|resetHostKey"      => \$rhk,
+    "aa|addalias=s"         => \$aa,
+    "ra|removealias=s"      => \$ra,
+    "su|setuser=s"          => \$su,
+    "sp|setport=s"          => \$sp,
+    "ls|list"               => \$ls,
+    "sn|setphone=s"         => \$sn,
+    "dn|deletephone"        => \$dn,
+    "se|setemail=s"         => \$se,
+    "de|deleteemail"        => \$de,
+    "sa|setauthenticator"   => \$sa,
+    "da|deleteauthenticator" => \$da,
+    "spw|setpassword=s"     => \$spw,
+    "spw|setpassword"       => \$spw,
+    "aca=s"                 => \$aca,
+    "rca=s"                 => \$rca,
+    "ayk"					=> \$ayk,
+    "ryk"					=> \$ryk,
+    "ey"					=> \$ey,
+    "dy"					=> \$dy,
+    "mosh"					=> \$mosh,
+    "u|user=s"              => \$user,
+    "help"                  => \$help,
+    "q|quiet"               => \$quiet,
+    "d|debug"               => \$debug,
+    "autocomplete=s"		=> \$autocomplete,
+    "autocomplete"       	=> \$autocomplete,
+    "kill=s"				=> \$kill,
+    "tor"					=> \$tor,
+    "v"                     => sub{  $debug = 1 ; },
+    "vv"                    => sub{  $debug = 2 ; },
+    "vvv"                   => sub{  $debug = 3 ; },
+    "<>"                    => \&host,
+);
+
+
+
+# Set Logger debug 
+$Logger::debug = $debug;
+
+
+# Instanciate Bastion
+my $bastion = new TG::BASTION({
+        'commandLine'   => $finalCommandLine,
+        'reset'         => $c,
+    });
+
+if(!$bastion)
+{
+    Logger::warn("TG Bastion failed to load !");
+    exit;
+}
+
+
+# Signals catching 
+$SIG{'USR1'} = sub {
+    $bastion->cleanOldSessions({ killMyself => 1 }) if $bastion;
+    print "\n";
+    exit;
+};
+
+
+# If tunnel created we launch bash
+if($bastion->{'tunnelCreated'})
+{
+    system('bash');
+    exit;
+}
+
+# Treat args
+if ($args)
+{
+    Logger::debug3("Dumper of ARGV : " . Dumper($args));
+
+    $string = $add  	if $add;
+    $string = $remove  	if $remove;
+    $string = $ra 		if $ra;
+    $string = $rca		if $rca;
+    $string = $spw		if $spw     and  $spw ne '1' ;
+
+    if ($help)
+    {
+        usage();
+        exit 0;
+    }
+
+    # If user ask ls
+    if ($ls)
+    {
+        $bastion->printDetail;
+        exit;
+    }
+
+    # If user ask to kill a session
+    if($kill)
+    {	
+        if($kill !~ /^\d+$/)
+        {
+            Logger::warn("Invalid pid : $kill");
+        }
+        elsif( not grep { $_->{'pid'} eq $kill } @{ $bastion->{'sessions'} } )
+        {
+            Logger::warn("You have no session with pid : $kill");
+        }
+        elsif( not TG::MISC::isPidAlive($kill))
+        {
+            Logger::warn("Pid $kill is already killed");
+        }
+        else
+        {
+            my $fnret = TG::MISC::killPid($kill);
+            if ($fnret)
+            {
+                Logger::notice("Session with pid $kill successfully killed");
+                $bastion->cleanOldSessions();
+            }
+            else
+            {
+                Logger::warn("Impossible to kill pid $kill");
+            }
+        }
+
+        exit;
+    }	
+
+    # Autocompmete
+    if($autocomplete)
+    {
+        my $aliases = {};
+
+        foreach ( keys %{ $bastion->{'store'} } )
+        {
+            my $hostname = $bastion->{'store'}->{$_}->{'hostname'};
+            $aliases->{$hostname}++;
+
+            foreach ( @{ $bastion->{'store'}->{$_}->{'aliases'} } )
+            {	
+                $aliases->{$_}++;
+            }
+
+            foreach ( keys %{ $bastion->{'store'}->{$_}->{'cmds'} } )
+            {   
+                $aliases->{$_}++;
+            }
+
+        }
+
+        foreach ( keys %{ $aliases } )
+        {
+            if($_ =~ /^$autocomplete/ or $autocomplete eq '1')
+            {
+                print $_ . " ";
+            }
+        }
+
+        exit;
+    }
+
+
+    # Parsing user
+    Logger::debug2("Dumper of ENV : ");
+    foreach my $key (sort keys(%ENV)) {
+        Logger::debug2("$key = " . $ENV{$key});
+    }
+
+
+    if ( $string and $string =~ /^(.*)@(.*)$/ )
+    {
+        $remoteUser = $1;
+        $string     = $2;
+    }
+
+    # Get host by string
+    $host = $bastion->getHostByAlias($string);
+    if ($host)
+    {
+        if($host->{'exec'} and $command)
+        {
+            $host->{'exec'} .= ' "' . $command . '"';
+        }
+
+        $host->{'port'} = $remotePort if $remotePort;
+
+        if ($remoteUser)
+        {
+            $host->{'user'} = $remoteUser;
+        }
+
+        unless ( $host->{'user'} )
+        {
+            $host->{'user'} = $bastion->{'settings'}->{'default_user'} || $ENV{'USER'};
+        }
+
+        if(!$ey && !$dy)
+        {
+            $SSH = TG::SSH->new( {
+                    mosh	=> $mosh,
+                    bastion	=> $bastion,
+                    host  	=> $host,
+                    cmd   	=> $command,
+                    quiet 	=> $quiet,
+                    tor		=> $tor,
+                });
+        }
+    }
+
+    ###
+    # SCREEN
+    ###
+
+    if ($scr && !$host)
+    {
+        my $screen = TG::SCREEN->new({
+                name => $scr,
+                user => $user,
+            });
+        $screen->join;
+        exit;
+    }
+    elsif ($scr) 
+    {
+        my $screen = TG::SCREEN->new({
+                name => $scr,
+                exec => $SSH->getFinalCmd,
+                options => { detachOnStart => 1 }
+            });
+
+        $screen->create;
+        exit;
+    }
+    elsif ($screenList)
+    {
+        TG::SCREEN::list();
+        exit;
+    }
+    elsif ($screenWipe)
+    {
+        TG::SCREEN::wipe();
+        exit;
+    }
+    elsif ($screenKill)
+    {
+        my $screen = TG::SCREEN->new({
+                name => $screenKill,
+                user => $user
+            });
+
+        $screen->kill;
+        exit;
+    }
+    elsif ($screenAllowUser)
+    {
+        my $screen = TG::SCREEN->new({
+                name => $string,
+            });
+
+        Logger::expect("Please enter screen password :");
+        my $password = TG::MISC::askPassword('CRYPT');
+
+        $screen->allowUser($screenAllowUser,$password);
+        exit;
+    }
+
+    elsif ($screenSetPassword)
+    {
+        my $screen = TG::SCREEN->new({
+                name => $screenSetPassword,
+            });
+
+        Logger::expect("Please enter screen password :");
+        my $password = TG::MISC::askPassword('CRYPT');
+
+        $screen->setPassword($password);
+        exit;
+    }
+
+
+    ###
+    # Hosts
+    ###
+
+    elsif ($add)
+    {
+        unless ($host)
+        {
+            Logger::warn("No host found");
+            exit 1;
+        }
+
+        $bastion->checkAlias($add);
+        $bastion->add($host);
+        exit;
+    }
+
+
+    elsif ($remove)
+    {
+        unless ($host)
+        {
+            Logger::warn("No host found");
+            exit 1;
+        }
+
+        if($host->isAlias($remove))
+        {
+            $host->removeAlias($remove);
+            $bastion->save;
+        }
+        elsif($host->isCmd($remove))
+        {
+            $host->removeCmd($remove);
+            $bastion->save;
+        }
+        else
+        {
+            $bastion->remove($host);
+        }
+
+        exit;
+    }
+
+    ###
+    # Keys
+    ###
+
+    elsif ($ak)
+    {
+        unless ( $host and $SSH )
+        {
+            Logger::warn("No host found");
+            exit 1;
+        }
+
+        $SSH->addKey;
+        exit;
+    }
+
+    elsif ($rk)
+    {
+        unless ( $host and $SSH )
+        {
+            Logger::warn("No host found");
+            exit 1;
+        }
+
+        $SSH->removeKey;
+        exit;
+
+    }
+
+    elsif ($rhk)
+    {
+        unless ( $host )
+        {
+            Logger::warn("No host found");
+            exit 1;
+        }
+
+        $SSH->resetHostKey;
+        $bastion->save;
+        exit;
+    }
+
+    ###
+    # Aliases
+    ###
+
+    elsif ($aa)
+    {
+        unless ($host)
+        {
+            Logger::warn("No host found");
+            exit 1;
+        }
+
+        $bastion->checkAlias($aa);
+        $host->addAlias($aa);
+        $bastion->save;
+        exit;
+    }
+    elsif ($ra)
+    {
+        unless ($host)
+        {
+            Logger::warn("Alias not found");
+            exit 1;
+        }
+
+        $host->removeAlias($ra);
+        $bastion->save;
+        exit;
+    }
+
+    ###
+    # Users
+    ###
+
+    elsif ($su)
+    {
+        if ($host)
+        {
+            $host->{'user'} = $su;
+            $bastion->add($host);
+            Logger::info("Default user for host " . $host->{'hostname'} . " is now " . $host->{'user'});
+        }
+        else
+        {
+            $bastion->{'settings'}->{'default_user'} = $su;
+            Logger::info("Default user is now " . $bastion->{'settings'}->{'default_user'});
+        }
+        $bastion->save;
+        exit;
+    }
+
+
+    ###
+    # Yubikeys
+    ###
+
+    elsif ($ayk)	
+    {
+        Logger::expect("Press your Yubikey to add it : ");
+        my $otp = TG::MISC::askPassword('NONE');
+
+        if(TG::MISC::isYubikeyOTPValid($otp))
+        {
+            $bastion->addYubikey($otp);
+        }
+        else
+        {
+            Logger::warn("Not a valid OTP for your key");
+        }
+        exit;
+    }
+    elsif ($ryk)
+    {
+        Logger::expect("Press your Yubikey to remove it : ");
+        my $otp = TG::MISC::askPassword('NONE');
+
+        if(TG::MISC::isYubikeyOTPValid($otp))
+        {
+            $bastion->removeYubikey($otp);
+        }
+        else
+        {
+            Logger::warn("Not a valid OTP for your key");
+        }
+        exit;
+    }
+    elsif($ey)
+    {
+        unless ( $host )
+        {
+            Logger::warn("No host found");
+            exit 1;
+        }
+
+        $host->enableYubikey();
+        $bastion->save;
+
+        exit;
+    }
+    elsif($dy)
+    {
+        unless ( $host )
+        {
+            Logger::warn("No host found");
+            exit 1;
+        }
+
+        $host->disableYubikey();
+        $bastion->save;
+
+        exit;
+    }
+
+
+    ###
+    # Port
+    ###
+
+    elsif ($sp)
+    {
+        unless ( $host )
+        {
+            Logger::warn("No host found");
+            exit 1;
+        }
+
+        unless ( $sp =~ /\d+/ and $sp > 0 and $sp < 65535 )
+        {
+            Logger::warn("$sp is not a valid port !");
+            exit 1;
+        }
+
+        $host->{'port'} = $sp;
+        $bastion->add($host);
+
+        Logger::info("Default port for host " . $host->{'hostname'} . " is now " . $host->{'port'});
+        exit;
+    }
+
+    ###
+    # Password
+    ###
+
+    elsif($spw)
+    {
+        unless ( $host )
+        {
+            $bastion->setPassword;		
+        }
+        else
+        {
+            $host->setPassword;
+            $bastion->add($host);
+        }
+        exit;
+    }
+
+    ###
+    # SMS & MAIL
+    ###
+
+    elsif ($sn)
+    {
+        $bastion->setPhone($sn);
+        exit;
+    }
+    elsif ($dn)
+    {
+        $bastion->deletePhone;
+        exit;
+    }
+    elsif ($se)
+    {
+        $bastion->setEmail($se);
+        exit;
+    }
+    elsif ($de)
+    {
+        $bastion->deleteEmail;
+        exit;
+    }
+    elsif ($sa)
+    {
+        $bastion->setAuthenticator($se);
+        exit;
+    }
+    elsif ($da)
+    {
+        $bastion->deleteAuthenticator;
+        exit;
+    }
+
+    ###
+    # Command alias
+    ###
+
+    elsif($aca)
+    {
+        unless ($host)
+        {
+            Logger::warn("No host found");
+            exit 1;
+        }
+
+        unless ($command)
+        {
+            Logger::warn("No command specified for creating alias !");
+            exit 1;
+        }
+
+        $bastion->checkAlias($aca);
+        $host->addCmd({
+                alias 	=> $aca,
+                cmd		=> $command,
+            });
+
+        $bastion->add($host);
+        exit;
+
+    }
+    elsif($rca)
+    {
+        $host->removeCmd($rca);
+        $bastion->save;
+        exit;	
+    }
+
+    ###
+    # Client
+    ###
+
+    elsif($client)
+    {
+        client($client, $command);
+        exit;
+    }
+
+    unless ( $host and $SSH )
+    {
+        Logger::info("No host found");
+        exit 1;
+    }
+
+    my $fnret = $SSH->connect;
+    exit;
+}
+else
+{
+    usage();
+}
+
+sub host
+{
+    my $input = shift;
+    $string = $input . "";
+    return $string;
+}
+
+sub usage
+{
+    print "													\n";
+    print "Usage : tg [OPTIONS] [USER\@HOST|HOST|ALIAS] [-- COMMAND]	\n";
+    print " 												\n";
+    print "[OPTIONS] : 										\n";
+    print "													\n";
+    print " -ls\t\t list hosts                              \n";
+    print " -a \t\t add host                                \n";
+    print " -r \t\t remove host                             \n";
+    print "                                                 \n";
+    print " -ak\t\t Add bastion key to your host			\n";
+    print " -rk\t\t Remove bastion key from host			\n";
+    print "                                             	\n";
+    print " -aa ALIAS \t Add alias to specified host    	\n";
+    print " -ra ALIAS \t Remove alias from specified host   \n";
+    print "                                             	\n";
+    print " -su USER  \t Set default user 					\n";
+    print " -su USER HOST\t Add user for specified host		\n";
+    print " -sp PORT HOST\t Set port for given host         \n";
+    print "                                                 \n";
+    print " -sn NUMBER\t Set mobile phone for verification  \n";
+    print "                                                 \n";
+    print " -q\t\t Quiet mode (less output)                 \n";
+    print " -d\t\t Debug mode (more output)                 \n";
+    print " -c\t\t Reset configuration                 		\n";
+    print " -h\t\t Print this help							\n";
+    print "                                                 \n";
+    print "Version\t\t: $version							\n";
+    print "Contributors\t:                 					\n";
+    print "  - skatkatt\@root.gg                            \n";
+    print "  - mathieu\@bodjikian.fr  <== EPIC ROXOX        \n";
+    print "                                                 \n";
+}
+
+sub client
+{
+    my $action = shift;
+    my $data = shift;	
+
+    if ( $action eq 'ping' )
+    {
+        exit 255 unless $ENV{SSH_CLIENT};
+        my ( $sshRemoteHost, $sshRemotePort, $sshLocalPort ) = split( ' ', $ENV{SSH_CLIENT});
+
+        Logger::info("PONG $sshRemoteHost, $sshRemotePort");
+        exit 0;
+    }
+
+    elsif ( $action eq 'addkey')
+    {
+        unless ( $data )
+        {
+            Logger::warn("Missing public key");
+            exit 1;
+        }
+
+        if ( open KEYS , '<', $ENV{'HOME'}.'/.ssh/authorized_keys' )
+        {
+            while(my $key = <KEYS>)
+            {
+                chomp $key;
+                if ( $key eq  $data )
+                {
+                    Logger::warn("Key already exist");
+                    exit;
+                }
+            }
+            close KEYS;
+        }
+        else
+        {
+            Logger::warn("Can't open " . $ENV{'HOME'}.'/.ssh/authorized_keys' . " : $!");
+            exit 1;
+        }
+
+        if ( open KEYS , '>>', $ENV{'HOME'}.'/.ssh/authorized_keys' )
+        {
+            chomp($data);
+            $data =~ s/^\s+//;
+            print KEYS $data . "\n";
+            close KEYS;
+
+            Logger::info("Key added");
+            exit;
+        }
+
+        Logger::warn("Can't open " . $ENV{'HOME'}.'/.ssh/authorized_keys' . " : $!");
+        exit 1;
+    }
+
+    elsif ( $action eq 'removekey')
+    {
+        unless ( $data )
+        {
+            Logger::warn("Missing public key");
+            exit 1;
+        }
+
+        chomp $data;
+        $data =~ s/^\s+//;
+
+        Logger::info("Removing key from authorized key...");
+        my $sed  	= "sed -i '\\%" . $data . "%d' ".$ENV{'HOME'}."/.ssh/authorized_keys" ;
+        my $fnret 	= `$sed`;
+
+        if($? eq 0)
+        {
+            Logger::info("Key deleted");
+        }
+        else
+        {
+            Logger::warn("Failed to remove your key from bastion : $fnret -- $!");
+        }
+
+        exit 0;	
+    }
+
+    elsif ( $client eq 'listkeys')
+    {
+        if ( open KEYS , '<', $ENV{'HOME'}.'/.ssh/authorized_keys' )
+        {
+            while(my $key = <KEYS>)
+            {
+                chomp $key;
+                print "$key \n";
+            }
+            close KEYS;
+        }
+        else
+        {
+            Logger::warn("Can't open " . $ENV{'HOME'}.'/.ssh/authorized_keys' . " : $!");
+            exit 1;
+        }
+        exit 0;
+    }
+
+    elsif ( $client eq 'shell' )
+    {
+        exec('bash');
+    }
+}
+
+
+END 
+{
+    if($bastion)
+    {
+        $bastion->load;
+        $bastion->cleanOldSessions({ killMyself => 1 }) if $bastion;
+    }
+}
+
+exit 0;

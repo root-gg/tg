@@ -1,0 +1,11 @@
+_tg_autocomplete()
+{
+    local cur=${COMP_WORDS[COMP_CWORD]}
+
+    HOSTS=$(tg -autocomplete);
+
+    COMPREPLY=( $(compgen -W "$HOSTS" -- $cur) )
+}
+
+complete -F _tg_autocomplete tg
+complete -F _tg_autocomplete /usr/bin/tg
