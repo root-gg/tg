@@ -233,7 +233,7 @@ tg -se myemail@mydomain.com
 
 Now, when you use tg for the first time from a new ip adress, you will need a two-factor authentication code. This code will be sent to you by mail to verify your identity. If two factor authentication with Google Authenticator is also enabled, you can enter one of the two codes.
 
-### Enabling two factor authentication with Google Authenticator (OTP) (Facultatif)
+### Enabling two factor authentication with Google Authenticator (OTP) (Optional)
 
 Follow the instructions to enable two factor authentication with Google Authenticator :
 ```sh
