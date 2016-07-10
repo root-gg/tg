@@ -819,7 +819,7 @@ sub client
         exit 0;	
     }
 
-    elsif ( $client eq 'listkeys')
+    elsif ( $action eq 'listkeys')
     {
         if ( open KEYS , '<', $ENV{'HOME'}.'/.ssh/authorized_keys' )
         {
@@ -838,7 +838,26 @@ sub client
         exit 0;
     }
 
-    elsif ( $client eq 'shell' )
+    elsif ( $action eq 'pubkey')
+    {
+        if ( open KEYS , '<', $ENV{'HOME'}.'/.ssh/id_rsa.pub' )
+        {
+            while(my $key = <KEYS>)
+            {
+                chomp $key;
+                print "$key \n";
+            }
+            close KEYS;
+        }
+        else
+        {
+            Logger::warn("Can't open " . $ENV{'HOME'}.'/.ssh/id_rsa.pub' . " : $!");
+            exit 1;
+        }
+        exit 0;
+    }
+
+    elsif ( $action eq 'shell' )
     {
         exec('bash');
     }
