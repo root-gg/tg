@@ -145,7 +145,15 @@ $SIG{'USR1'} = sub {
 # If tunnel created we launch bash
 if($bastion->{'tunnelCreated'})
 {
-    system('bash');
+    if($bastion->{'settings'}->{'allow_shell'})
+    {
+        system('bash');
+    }
+    else
+    {
+        Logger::info('You are not allowed to use a shell on the bastion itself, press any key to close the tunnel');
+        <STDIN>;
+    }
     exit;
 }
 
@@ -859,7 +867,15 @@ sub client
 
     elsif ( $action eq 'shell' )
     {
-        exec('bash');
+        if($bastion->{'settings'}->{'allow_shell'})
+        {
+            exec('bash');
+        }
+        else
+        {
+            Logger::info('You are not allowed to use shell on the bastion itself');
+            exit 0;
+        }
     }
 }
 

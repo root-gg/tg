@@ -49,6 +49,7 @@ sub new
         'settings'		=>
         {
             'default_user' => $username,
+            'allow_shell'   => 0,
         },
     };
 
