@@ -366,7 +366,7 @@ sub removeKey {
     chomp($key);
 
     # Delete keys from remote host
-    my $sed  = "sed -i '/$key/d' ".$this->{"remote_authorized_keys_path"};
+    my $sed  = "sed -i '\\|$key|d' ".$this->{"remote_authorized_keys_path"};
     my $host = $this->{'hostname'};
     my $port = $this->{'port'};
     my $user = $this->{'user'};
