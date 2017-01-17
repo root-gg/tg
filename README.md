@@ -36,7 +36,7 @@ apt-get install openssh-server git libjson-perl libemail-mime-perl libdatetime-p
 Clone repo in a directory (ex: _/opt/tg_)
 
 ```sh
-git clone git@github.com:root-gg/tg.git /opt/tg
+git clone https://github.com/root-gg/tg.git /opt/tg
 ```
 
 Create a new user without password and with the tg _cache_ program as shell :
