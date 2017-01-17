@@ -87,7 +87,7 @@ Clone tg in a folder (ex: ~/bin/tg) :
 
 ```sh
 mkdir ~/bin
-git clone git@github.com:root-gg/tg.git ~/bin/tg
+git clone https://github.com/root-gg/tg.git ~/bin/tg
 ```
 
 Change your PATH to add ~/bin/tg :
