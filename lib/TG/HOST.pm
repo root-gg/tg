@@ -22,7 +22,6 @@ sub new
 sub init
 {
     my $this = shift;
-    $this->{'port'} 	||= 22;
     $this->{'aliases'} 	||= [];
     $this->{'cmds'}		||= {};
 }
