@@ -281,6 +281,11 @@ if ($args)
             $host->{'user'} = $bastion->{'settings'}->{'default_user'} || $ENV{'USER'};
         }
 
+        unless ( $host->{'port'} )
+        {
+            $host->{'port'} = $bastion->{'settings'}->{'default_port'} || 22;
+        }
+
         if(!$ey && !$dy)
         {
             $SSH = TG::SSH->new( {
@@ -571,20 +576,25 @@ if ($args)
 
     elsif ($sp)
     {
-        unless ( $host )
-        {
-            Logger::warn("No host found");
-            exit 1;
-        }
-
         unless ( $sp =~ /\d+/ and $sp > 0 and $sp < 65535 )
         {
             Logger::warn("$sp is not a valid port !");
             exit 1;
         }
 
-        $host->{'port'} = $sp;
-        $bastion->add($host);
+        if ($host)
+        {
+            $host->{'port'} = $sp;
+            $bastion->add($host);
+ 
+            Logger::info("Default port for host " . $host->{'hostname'} . " is now " . $host->{'port'});
+        }
+        else
+        {
+            $bastion->{'settings'}->{'default_port'} = $sp;
+            Logger::info("Default port is now " . $bastion->{'settings'}->{'default_port'});
+            $bastion->save;
+        }
 
         Logger::info("Default port for host " . $host->{'hostname'} . " is now " . $host->{'port'});
         exit;
