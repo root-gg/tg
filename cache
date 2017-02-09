@@ -596,7 +596,6 @@ if ($args)
             $bastion->save;
         }
 
-        Logger::info("Default port for host " . $host->{'hostname'} . " is now " . $host->{'port'});
         exit;
     }
 
