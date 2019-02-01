@@ -886,6 +886,12 @@ sub client
             exit 0;
         }
     }
+    elsif ( $action eq 'tunnel' )
+    {
+        Logger::info('Tunnel created, press any key to close the tunnel');
+        <STDIN>;
+        exit 0;
+    }
 }
 
 
