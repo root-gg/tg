@@ -1,3 +1,5 @@
+> This project has not been updated since a long time. While it should still work and may be updated someday, you can consider using the well-maintained project "The Bastion" available here : https://github.com/ovh/the-bastion
+
 TG
 =========
 
